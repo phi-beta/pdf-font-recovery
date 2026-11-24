@@ -24,7 +24,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 
-from . import extract, normalise, repair, verify
+from . import cff_borrow, extract, normalise, repair, verify
 from .manifest import Manifest, StyleSpec, resolve_inputs
 
 #: A fixed timestamp used when the manifest does not supply one.
@@ -235,6 +235,64 @@ def run(
             )
         result.repairs.append(report.to_dict())
     result.stages.append(StageReport("repair", {"repaired": len(result.repairs)}).to_dict())
+
+    # ---- cross-weight borrowing
+    #
+    # A family is usually used at several weights, and different documents
+    # set different characters.  The union of the characters available
+    # across the family's weights is therefore wider than the characters
+    # any single weight carries, so a weight that is missing a character
+    # can borrow it from a sibling.
+    #
+    # The borrowed glyph is the right letterform in the WRONG weight, and
+    # the report says so.  A font with borrowed figures looks right and is
+    # not what its name claims, which is exactly why it is recorded.
+    log("[3b/6] cross-weight borrowing")
+    for family_name in manifest.families:
+        member_paths = [
+            path for spec, path, _fmt in built if spec.family == family_name
+        ]
+        if len(member_paths) < 2:
+            continue
+        for spec, path, _fmt in built:
+            if spec.family != family_name:
+                continue
+            donors = [other for other in member_paths if other != path]
+            try:
+                outcome = cff_borrow.borrow_characters(
+                    path,
+                    donors,
+                    reproducible_timestamp=timestamp,
+                )
+            except Exception as exc:
+                log(f"      FAIL {spec.key:26s} {type(exc).__name__}: {exc}")
+                result.skipped.append(
+                    {"style": spec.key, "reason": f"borrow: {type(exc).__name__}: {exc}"}
+                )
+                continue
+            if outcome["borrowed"] or outcome["overlay"]:
+                log(
+                    f"      {spec.key:26s} borrowed={outcome['borrowed']:3d} "
+                    f"overlay={outcome['overlay']:3d} errors={len(outcome['errors'])}"
+                )
+            if outcome["errors"]:
+                for message in outcome["errors"][:5]:
+                    log(f"        {message}")
+            result.repairs.append(
+                {
+                    "file": os.path.basename(path),
+                    "style": spec.key,
+                    "base": os.path.basename(path),
+                    "filled": [],
+                    "borrowed": [],
+                    "overlaid": [],
+                    "still_blank": [],
+                    "problems": outcome["errors"],
+                    "cff_borrowed": outcome["borrowed"],
+                    "cff_overlay": outcome["overlay"],
+                }
+            )
+    result.stages.append(StageReport("borrow", {"families": len(manifest.families)}).to_dict())
 
     # ---- normalise
     log("[4/6] normalise")
