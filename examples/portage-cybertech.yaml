@@ -1,0 +1,181 @@
+# The Portage CyberTech corpus: the first fixture for pdf-font-recovery.
+#
+# Four families, both embedded formats, and two of the interesting defect
+# classes:
+#
+#   * Altone   - the PDF subsets have EMPTY outlines for every character no
+#                document set, and the publisher's trial has PLACEHOLDER
+#                digits (one shared bounding box).  Repair needs the union
+#                across documents plus a fill from the trial that excludes
+#                the placeholders.
+#   * Mundial  - the PDF subsets are CFF, so they need merging and a fresh
+#                OpenType container.
+#   * Cellofy  - CFF, one style, complete in the PDF.
+#   * Proxima Nova - the IDC report author's font, not a Portage family.  Its
+#                CFF subsets only cover ~85 characters between them, so it
+#                is inherently partial.
+#
+# Arial Black and Baskerville Old Face are standard Windows fonts, already
+# installed; the PDF copies of them are stripped subsets with no cmap and no
+# OS/2.  They are skipped rather than shipped broken.
+
+version: 1
+name: portage-cybertech
+
+inputs:
+  - "E:/Clients/Portage Cybertech/public docs/**/*.pdf"
+
+output_dir: "E:/Clients/Portage Cybertech/artifacts/all/fonts"
+
+reproducible_timestamps: true
+
+families:
+  Altone:
+    styles:
+      Altone-Regular:
+        family: Altone
+        subfamily: Regular
+        weight: 400
+      Altone-Light:
+        family: Altone
+        subfamily: Light
+        weight: 300
+      Altone-Medium:
+        family: Altone
+        subfamily: Medium
+        weight: 500
+      Altone-SemiBold:
+        family: Altone
+        subfamily: SemiBold
+        weight: 600
+      Altone-Bold:
+        family: Altone
+        subfamily: Bold
+        weight: 700
+      Altone-RegularOblique:
+        family: Altone
+        subfamily: Italic
+        weight: 400
+        italic: true
+      Altone-MediumOblique:
+        family: Altone
+        subfamily: Medium Italic
+        weight: 500
+        italic: true
+      Altone-SemiBoldOblique:
+        family: Altone
+        subfamily: SemiBold Italic
+        weight: 600
+        italic: true
+    base_fonts:
+      Altone-Regular:
+        path: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Regular.ttf"
+        exact_weight: true
+        license: personal-use trial
+
+  Mundial:
+    styles:
+      Mundial-Hair:
+        family: Mundial
+        subfamily: Hair
+        weight: 100
+      Mundial-Thin:
+        family: Mundial
+        subfamily: Thin
+        weight: 100
+      Mundial-Light:
+        family: Mundial
+        subfamily: Light
+        weight: 200
+      Mundial-Regular:
+        family: Mundial
+        subfamily: Regular
+        weight: 400
+      Mundial-DemiBold:
+        family: Mundial
+        subfamily: DemiBold
+        weight: 600
+      Mundial-Bold:
+        family: Mundial
+        subfamily: Bold
+        weight: 700
+      Mundial-Black:
+        family: Mundial
+        subfamily: Black
+        weight: 900
+      Mundial-HairItalic:
+        family: Mundial
+        subfamily: Hair Italic
+        weight: 100
+        italic: true
+      Mundial-ThinItalic:
+        family: Mundial
+        subfamily: Thin Italic
+        weight: 100
+        italic: true
+      Mundial-LightItalic:
+        family: Mundial
+        subfamily: Light Italic
+        weight: 200
+        italic: true
+      Mundial-Italic:
+        family: Mundial
+        subfamily: Italic
+        weight: 400
+        italic: true
+      Mundial-DemiBoldItalic:
+        family: Mundial
+        subfamily: DemiBold Italic
+        weight: 600
+        italic: true
+      Mundial-BoldItalic:
+        family: Mundial
+        subfamily: Bold Italic
+        weight: 700
+        italic: true
+      Mundial-BlackItalic:
+        family: Mundial
+        subfamily: Black Italic
+        weight: 900
+        italic: true
+
+  Cellofy:
+    styles:
+      Cellofy-Bold:
+        family: Cellofy
+        subfamily: Bold
+        weight: 700
+
+  Proxima Nova:
+    styles:
+      ProximaNova-Light:
+        family: Proxima Nova
+        subfamily: Light
+        weight: 300
+        origin: IDC report author
+      ProximaNova-Regular:
+        family: Proxima Nova
+        subfamily: Regular
+        weight: 400
+        origin: IDC report author
+      ProximaNova-RegularIt:
+        family: Proxima Nova
+        subfamily: Italic
+        weight: 400
+        italic: true
+        origin: IDC report author
+      ProximaNova-Semibold:
+        family: Proxima Nova
+        subfamily: Semibold
+        weight: 600
+        origin: IDC report author
+      ProximaNova-Bold:
+        family: Proxima Nova
+        subfamily: Bold
+        weight: 700
+        origin: IDC report author
+      ProximaNova-Extrabld:
+        family: Proxima Nova
+        subfamily: ExtraBold
+        weight: 800
+        origin: IDC report author

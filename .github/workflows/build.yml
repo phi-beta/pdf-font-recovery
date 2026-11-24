@@ -1,0 +1,64 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: python -m ruff check src/ tests/
+
+      - name: Test
+        run: python -m pytest tests/ -v
+
+  determinism:
+    name: determinism
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # The property the whole tool rests on: two runs over the same input
+      # must produce byte-identical output.  A regression here would make
+      # every artefact this tool produces untrustworthy, so it is checked in
+      # CI rather than trusted.
+      - name: Two runs must be byte-identical
+        run: |
+          set -euo pipefail
+          python -m pytest tests/test_pipeline.py::test_two_runs_are_byte_identical -v
+          python -m pytest tests/test_determinism.py -v
