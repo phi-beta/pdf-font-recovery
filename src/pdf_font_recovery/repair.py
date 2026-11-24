@@ -132,12 +132,26 @@ def _copy_glyph(source_font, source_name: str, target_font, target_name: str, se
     # maxp table's recalc walks every glyph in the order and looks each one
     # up in hmtx, so a component without a metrics entry fails the compile
     # with a KeyError.
-    _set_metrics(target_font, target_name, 0)
+    #
+    # The width must be the SOURCE's width, not zero.  Zeroing it is
+    # tempting - the copy has no metrics yet - but a zero advance makes the
+    # glyph advance nowhere, so it renders on top of its neighbour.  A font
+    # built that way loads cleanly and passes every structural check while
+    # looking like the letter spacing collapsed.
+    _set_metrics(target_font, target_name, _source_width(source_font, source_name))
     for component in getattr(target_glyph, "components", []) or []:
         component_name = component.glyphName
         if component_name in target_font.getGlyphOrder():
-            _set_metrics(target_font, component_name, 0)
+            _set_metrics(target_font, component_name, _source_width(source_font, component_name))
     return True
+
+
+def _source_width(font, name: str) -> int:
+    """The advance width of a glyph in a source font, or 0 if it has none."""
+    try:
+        return font["hmtx"].metrics[name][0]
+    except Exception:
+        return 0
 
 
 def _set_metrics(font, name: str, width: int) -> None:
@@ -175,17 +189,17 @@ def _union_true_type_styles(
             target_name = target_cmap.get(code)
             if target_name is None:
                 # Not in the target at all: copy the glyph and map the code.
+                # _copy_glyph has already set the metrics from the source.
                 new_name = f"uni{code:04X}"
                 if _copy_glyph(source_font, source_name, target, new_name, set()):
                     _add_to_glyph_order(target, new_name)
                     target_cmap[code] = new_name
-                    _set_metrics(target, new_name, 0)
                     added.append(char)
                 continue
             # Present but possibly blank: only replace when the target is blank.
             if not has_ink(target, target_name) and has_ink(source_font, source_name):
+                # _copy_glyph has already set the metrics from the source.
                 if _copy_glyph(source_font, source_name, target, target_name, set()):
-                    _set_metrics(target, target_name, 0)
                     added.append(char)
     return added
 
@@ -242,7 +256,6 @@ def repair_style(
                 if _copy_glyph(external, external_name, font, new_name, set()):
                     _add_to_glyph_order(font, new_name)
                     target_cmap[code] = new_name
-                    _set_metrics(font, new_name, 0)
                     if external_exact_weight:
                         report.overlaid.append(char)
                     else:
@@ -250,7 +263,6 @@ def repair_style(
                 continue
             if not has_ink(font, target_name):
                 if _copy_glyph(external, external_name, font, target_name, set()):
-                    _set_metrics(font, target_name, 0)
                     if external_exact_weight:
                         report.overlaid.append(char)
                     else:
@@ -313,11 +325,9 @@ def borrow_across_weights(
                 if _copy_glyph(sibling, sibling_name, font, new_name, set()):
                     _add_to_glyph_order(font, new_name)
                     target_cmap[code] = new_name
-                    _set_metrics(font, new_name, 0)
                     report.borrowed.append(char)
             elif not has_ink(font, target_name):
                 if _copy_glyph(sibling, sibling_name, font, target_name, set()):
-                    _set_metrics(font, target_name, 0)
                     report.borrowed.append(char)
 
     font.save(path)

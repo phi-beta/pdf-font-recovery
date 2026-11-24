@@ -24,7 +24,12 @@ def box_glyph(x_min: int, y_min: int, x_max: int, y_max: int):
 
 
 def empty_glyph():
-    """A glyph with no outline at all - what a PDF subsetter leaves behind."""
+    """A glyph with no outline at all - what a PDF subsetter leaves behind.
+
+    Note that a DEGENERATE box - a contour with zero width and height -
+    is NOT empty.  It has a contour, so ``numberOfContours`` is 1 and the
+    glyph reads as having ink.  A blank glyph has no contour at all.
+    """
     pen = TTGlyphPen(None)
     return pen.glyph()
 
