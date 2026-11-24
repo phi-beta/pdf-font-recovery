@@ -23,6 +23,31 @@ def box_glyph(x_min: int, y_min: int, x_max: int, y_max: int):
     return pen.glyph()
 
 
+def varied_box_glyph(index: int, x_min: int = 0, y_min: int = 0, x_max: int = 500, y_max: int = 700):
+    """A box whose BOUNDS and shape differ from every other one.
+
+    The placeholder detector groups glyphs by their BOUNDING BOX - that
+    is what a font's shared missing-glyph box looks like.  So a fixture
+    whose glyphs all share one box would be read as a font where every
+    character is a placeholder, and the spacing check would exclude them
+    all.  Real letters differ in size and shape, and so must the
+    fixture.
+    """
+    # Each glyph gets its own bounds AND its own notch.
+    width = 400 + (index % 9) * 10
+    height = 600 + (index % 7) * 10
+    pen = TTGlyphPen(None)
+    notch = (index * 13) % 200
+    pen.moveTo((x_min, y_min))
+    pen.lineTo((x_min, notch))
+    pen.lineTo((x_min + 20 + (index % 5) * 10, notch))
+    pen.lineTo((x_min + 20 + (index % 5) * 10, y_min + height))
+    pen.lineTo((x_min + width, y_min + height))
+    pen.lineTo((x_min + width, y_min))
+    pen.closePath()
+    return pen.glyph()
+
+
 def empty_glyph():
     """A glyph with no outline at all - what a PDF subsetter leaves behind.
 

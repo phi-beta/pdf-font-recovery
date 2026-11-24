@@ -24,7 +24,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 
-from . import cff_borrow, extract, normalise, repair, verify
+from . import cff_borrow, extract, normalise, repair, spacing, verify
 from .manifest import Manifest, StyleSpec, resolve_inputs
 
 #: A fixed timestamp used when the manifest does not supply one.
@@ -56,6 +56,7 @@ class PipelineResult:
     fonts: list[dict] = field(default_factory=list)
     repairs: list[dict] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)
+    spacing: list[dict] = field(default_factory=list)
     skipped: list[dict] = field(default_factory=list)
     stages: list[dict] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
@@ -333,13 +334,60 @@ def run(
     result.summary = summary
     result.stages.append(StageReport("verify", summary).to_dict())
 
+    # ---- the spacing gate
+    #
+    # A font can be structurally perfect and still render with the letters
+    # on top of each other: a wrong advance width is invisible to every
+    # structural check.  This is the gate that catches it.
+    #
+    # Where the manifest names a REFERENCE font for a style - the
+    # publisher's own file for that weight - the comparison is
+    # authoritative.  Without one, the check is still self-consistent: it
+    # catches a zero advance and a letter collapsed relative to its own
+    # font's siblings.
+    log("[5b/6] spacing")
+    references = {
+        spec.stem + extension: spec.reference
+        for spec in manifest.all_styles()
+        if spec.reference
+        for extension in (".ttf", ".otf")
+    }
+    spacing_checks = spacing.check_directory(staging, references)
+    spacing_summary = spacing.summarise(spacing_checks)
+    for check in spacing_checks:
+        if check.problems:
+            log(f"      SPACING {check.name}: {check.problems[0]}")
+    log(
+        f"      {spacing_summary['fonts']} fonts, {spacing_summary['zero_advance']} zero "
+        f"advances, {spacing_summary['inconsistent']} inconsistent, "
+        f"{spacing_summary['mismatched']} disagreeing with their reference"
+    )
+    result.spacing = [c.to_dict() for c in spacing_checks]
+    result.summary["spacing"] = spacing_summary
+    result.stages.append(StageReport("spacing", spacing_summary).to_dict())
+
     # ---- the coverage gate
     failures = [c for c in checks if c.blank or c.problems]
-    if failures:
-        log(f"      GATE FAILED: {len(failures)} fonts have blank outlines or problems")
+    spacing_failures = [c for c in spacing_checks if c.problems]
+    if failures or spacing_failures:
+        log(
+            f"      GATE FAILED: {len(failures)} fonts have blank outlines or problems, "
+            f"{len(spacing_failures)} have spacing problems"
+        )
         for check in failures:
             log(f"        {check.name}: blank={len(check.blank)} problems={check.problems}")
-        result.stages.append(StageReport("gate", {"passed": False, "failures": len(failures)}).to_dict())
+        for check in spacing_failures:
+            log(f"        {check.name}: {check.problems}")
+        result.stages.append(
+            StageReport(
+                "gate",
+                {
+                    "passed": False,
+                    "failures": len(failures) + len(spacing_failures),
+                    "spacing_failures": len(spacing_failures),
+                },
+            ).to_dict()
+        )
         if publish:
             log("      NOT publishing - the staging directory is left for inspection")
             result.summary["gate_passed"] = False
@@ -406,6 +454,9 @@ def _write_reports(result: PipelineResult, directory: str) -> None:
         json.dump(result.fonts, fh, indent=1)
     with open(os.path.join(directory, "_coverage.json"), "w", encoding="utf-8") as fh:
         json.dump(result.checks, fh, indent=1)
+    if result.spacing:
+        with open(os.path.join(directory, "_spacing.json"), "w", encoding="utf-8") as fh:
+            json.dump(result.spacing, fh, indent=1)
     report = result.to_dict()
     # Three things in the report are wall-clock or run-state, not build
     # output: the elapsed time, the output directory, and whether this

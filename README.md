@@ -48,10 +48,64 @@ pdf-font-recovery extract --manifest my.yaml --no-publish --staging ./build
 
 # check an existing directory of fonts (this is what CI runs)
 pdf-font-recovery verify --dir ./fonts
+
+# check the letter spacing of a directory of fonts
+pdf-font-recovery spacing --dir ./fonts
 ```
 
-`extract` exits 1 when the coverage gate fails. `verify` exits 1 when any
-font has a blank outline.
+`extract` exits 1 when the coverage or spacing gate fails. `verify` exits 1
+when any font has a blank outline. `spacing` exits 1 when any font has a
+broken advance width.
+
+## Letter spacing
+
+A font can be structurally perfect and still render with the letters on
+top of each other. The advance width is how far the pen moves before the
+next glyph is drawn; get it wrong and the letters overlap - while the
+font still loads, still has a valid name table, and still passes every
+structural check. The ink check catches blank *outlines*; nothing catches
+a wrong *advance*.
+
+So the tool measures the advance of every letter and figure, and:
+
+- **a zero advance is always a defect.** No real glyph advances nowhere.
+  This is the signature of a metrics entry created as a placeholder and
+  never filled in.
+- **a letter that is collapsed relative to its own font's siblings is a
+  defect.** The check is relative to the font's own median, so it works
+  on any typeface - a font that is tight throughout is fine, a font with
+  one collapsed letter is not.
+- **a font that disagrees with a reference is a defect.** Name a
+  `reference` for a style and the recovered font is compared with it,
+  like for like:
+
+  ```yaml
+  styles:
+    Mundial-BlackItalic:
+      family: Mundial
+      subfamily: Black Italic
+      weight: 900
+      italic: true
+      reference: "C:/fonts/Fontspring-DEMO-8-mundial-black-italic-tty.otf"
+  ```
+
+  The reference is what makes the check authoritative rather than merely
+  self-consistent.
+
+**Tight spacing is not automatically a defect.** Italics lean into their
+neighbours on purpose: Mundial Black Italic has 21 of 62 letters advancing
+narrower than their own ink, in the publisher's own file. A gate that
+treated "advance < ink" as a defect would reject every good italic. What
+proves a defect is a *mismatch* against the source, not a tight letter.
+
+A reference can be wrong too. The Altone Trial's ten digits are all one
+placeholder box, so its advances for those characters are the advance of
+a box rather than of a figure; comparing against it would flag the
+recovered font's correct figures as wrong. Those characters are excluded
+from the comparison - and the exclusion is reported, because a comparison
+that silently drops characters cannot be trusted.
+
+The results land in `_spacing.json` beside the fonts.
 
 ## The manifest
 

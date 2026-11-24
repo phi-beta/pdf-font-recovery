@@ -145,6 +145,15 @@ families:
         family: Cellofy
         subfamily: Bold
         weight: 700
+        # The publisher's own file for this weight.  Naming a reference
+        # turns the letter-spacing check from self-consistent into
+        # authoritative: the recovered font is compared with the source
+        # it was recovered from, like for like.
+        #
+        # The reference must be the SAME weight - an oblique is compared
+        # with an oblique.  Comparing an italic with an upright tells
+        # you about the slant, not about the recovery.
+        reference: "C:/TEMP/fontdl/cellofy/cellofy.bold.otf"
 
   Proxima Nova:
     styles:

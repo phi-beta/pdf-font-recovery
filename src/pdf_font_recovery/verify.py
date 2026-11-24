@@ -78,17 +78,31 @@ class FontCheck:
 
 
 def glyph_bounds(font, name: str) -> tuple[int, int, int, int]:
-    """The bounding box of a TrueType glyph, or (0,0,0,0) if it has none."""
-    glyf = font["glyf"]
-    try:
-        glyph = glyf[name]
-    except KeyError:
-        return (0, 0, 0, 0)
-    if hasattr(glyph, "xMin"):
-        return (glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax)
+    """The bounding box of a glyph, or (0,0,0,0) if it has none.
+
+    A TrueType font stores the bounds in the ``glyf`` table.  A CFF font
+    has no ``glyf`` table at all - the bounds have to be measured by
+    drawing the glyph.  Reading ``font["glyf"]`` on a CFF font raises a
+    KeyError, so the two cases have to be distinguished explicitly.
+    """
+    if "glyf" in font:
+        glyf = font["glyf"]
+        try:
+            glyph = glyf[name]
+        except KeyError:
+            return (0, 0, 0, 0)
+        if hasattr(glyph, "xMin"):
+            return (glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax)
+        try:
+            pen = BoundsPen(NullPen())
+            glyph.draw(pen, glyf)
+            return pen.bounds or (0, 0, 0, 0)
+        except Exception:
+            return (0, 0, 0, 0)
+    # CFF: measure by drawing.
     try:
         pen = BoundsPen(NullPen())
-        glyph.draw(pen, glyf)
+        font.getGlyphSet()[name].draw(pen)
         return pen.bounds or (0, 0, 0, 0)
     except Exception:
         return (0, 0, 0, 0)

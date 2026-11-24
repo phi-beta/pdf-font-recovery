@@ -56,6 +56,10 @@ class StyleSpec:
     output_name: str | None = None
     #: Source document for this style, e.g. "Proxima Nova" (not a Portage font).
     origin: str | None = None
+    #: A font this style's spacing is compared against - the publisher's
+    #: own file for this weight, if there is one.  It is what makes the
+    #: spacing check authoritative rather than merely self-consistent.
+    reference: str | None = None
 
     @property
     def stem(self) -> str:
@@ -151,6 +155,7 @@ def _parse_style(key: str, raw: dict[str, Any]) -> StyleSpec:
         italic=bool(raw.get("italic", False)),
         output_name=raw.get("output_name"),
         origin=raw.get("origin"),
+        reference=raw.get("reference"),
     )
 
 
