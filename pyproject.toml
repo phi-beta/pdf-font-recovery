@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,13 +8,15 @@ version = "0.1.0"
 description = "Deterministically extract, repair and verify fonts embedded in PDF documents."
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+# A plain SPDX expression.  The table form ({text = "MIT"}) is deprecated by
+# setuptools and stops being supported in February 2027.
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["fonts", "pdf", "opentype", "cff", "subsetting", "typography"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
