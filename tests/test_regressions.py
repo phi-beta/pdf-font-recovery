@@ -109,6 +109,53 @@ def test_the_cff_metrics_helper_is_shared_between_build_and_borrow():
 # ----------------------------------------------------------------------
 
 
+def test_a_font_with_no_reference_is_reported_as_unchecked(tmp_path):
+    """A font nobody compared is NOT a font that agrees.
+
+    The summary line reads "N disagreeing with their reference".  When
+    a font has no reference at all, that line must not imply it was
+    checked - six Proxima Nova fonts have no licensed reference, and
+    the count has to say so.  Otherwise "0 disagreeing" reads as "all
+    thirty agree" when six were never looked at.
+
+    This is the same shape as the missing-evidence problem the
+    reference gate has: a check that cannot run must be visible as
+    not-run, not as passed.
+    """
+    from pdf_font_recovery import spacing
+
+    checked = spacing.SpacingCheck(path="Checked.otf")
+    checked.reference = "some/reference.otf"
+    checked.compared = 52
+
+    unchecked = spacing.SpacingCheck(path="Unchecked.otf")
+    unchecked.reference = ""
+    unchecked.compared = 0
+
+    summary = spacing.summarise([checked, unchecked])
+    assert summary["fonts"] == 2
+    assert summary["mismatched"] == 0
+    assert summary["fonts_without_reference"] == 1
+
+    report = spacing.format_report([checked, unchecked])
+    assert "NOT compared" in report
+    assert "1 of 2 fonts" in report
+
+
+def test_a_reference_with_no_shared_characters_is_reported_as_unchecked(tmp_path):
+    """A reference that shares no characters compares nothing."""
+    from pdf_font_recovery import spacing
+
+    check = spacing.SpacingCheck(path="Disjoint.otf")
+    check.reference = "some/reference.otf"
+    check.compared = 0
+
+    summary = spacing.summarise([check])
+    assert summary["mismatched"] == 0
+    assert summary["fonts_without_comparison"] == 1
+    assert "NOT compared" in spacing.format_report([check])
+
+
 def test_a_character_the_font_cannot_draw_is_dropped(tmp_path):
     """A mapped character with no outlines is worse than a missing one.
 

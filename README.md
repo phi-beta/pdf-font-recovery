@@ -51,11 +51,22 @@ pdf-font-recovery verify --dir ./fonts
 
 # check the letter spacing of a directory of fonts
 pdf-font-recovery spacing --dir ./fonts
+
+# ... comparing each style against ITS OWN publisher reference, read
+# from the manifest.  Without --manifest no font is compared with a
+# reference at all, and the report says so.
+pdf-font-recovery spacing --dir ./fonts --manifest my.yaml
 ```
 
 `extract` exits 1 when the coverage or spacing gate fails. `verify` exits 1
 when any font has a blank outline. `spacing` exits 1 when any font has a
 broken advance width.
+
+**A font that was not compared is not a font that agrees.** The spacing
+report says how many fonts carry no reference at all, and how many have
+one but share no characters with it. A font with no licensed reference -
+Proxima Nova has none - is checked only against its own siblings, and the
+report must not imply otherwise.
 
 ## Letter spacing
 

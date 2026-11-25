@@ -535,7 +535,7 @@ def run(
         if spec.reference
         for extension in (".ttf", ".otf")
     }
-    spacing_checks = spacing.check_directory(staging, references)
+    spacing_checks = spacing.check_directory(staging, references=references)
     spacing_summary = spacing.summarise(spacing_checks)
     for check in spacing_checks:
         if check.problems:
@@ -545,6 +545,19 @@ def run(
         f"advances, {spacing_summary['inconsistent']} inconsistent, "
         f"{spacing_summary['mismatched']} disagreeing with their reference"
     )
+    # Say what was NOT checked.  A font with no reference is unchecked,
+    # not agreed - and a summary that omits that reads as a clean bill.
+    unchecked = (
+        spacing_summary["fonts_without_reference"]
+        + spacing_summary["fonts_without_comparison"]
+    )
+    if unchecked:
+        log(
+            f"      {unchecked} of {spacing_summary['fonts']} fonts were NOT compared "
+            f"with a reference ({spacing_summary['fonts_without_reference']} with no "
+            f"reference at all, {spacing_summary['fonts_without_comparison']} with a "
+            f"reference but no shared characters)"
+        )
     result.spacing = [c.to_dict() for c in spacing_checks]
     result.summary["spacing"] = spacing_summary
     result.stages.append(StageReport("spacing", spacing_summary).to_dict())

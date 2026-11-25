@@ -72,10 +72,34 @@ def _cmd_spacing(args) -> int:
     advance width is invisible to every structural check, so the font
     loads, has a valid name table, and renders wrong.
 
-    ``--reference`` names a reference font for the whole directory; a
-    manifest is the better way to give each style its own reference.
+    ``--reference`` names a reference font for the whole directory.  A
+    manifest is the better way to give each style its own reference, so
+    ``--manifest`` reads the per-style references from one.
+
+    With neither, the spacing is measured against the font's OWN
+    siblings and no reference comparison happens at all.  The report
+    says so: a font that was not compared is not a font that agrees.
     """
-    checks = spacing.check_directory(args.dir, args.reference)
+    references = {}
+    if getattr(args, "manifest", None):
+        try:
+            manifest = load_manifest(args.manifest)
+        except (ManifestError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        for family in manifest.families.values():
+            for spec in family.styles.values():
+                if spec.reference:
+                    references[spec.stem] = spec.reference
+        if not references:
+            print(
+                "error: the manifest names no reference for any style, so no "
+                "font would be compared with anything",
+                file=sys.stderr,
+            )
+            return 2
+
+    checks = spacing.check_directory(args.dir, args.reference, references)
     if args.json:
         print(json.dumps([c.to_dict() for c in checks], indent=1))
     else:
@@ -149,6 +173,13 @@ def build_parser() -> argparse.ArgumentParser:
     spacing_parser.add_argument(
         "--reference",
         help="a reference font to compare against - the publisher's own file",
+    )
+    spacing_parser.add_argument(
+        "--manifest",
+        help=(
+            "a manifest to read each style's own reference from.  Without one, "
+            "no font is compared with a reference and the report says so"
+        ),
     )
     spacing_parser.add_argument("--json", action="store_true", help="print the report as JSON")
     spacing_parser.set_defaults(func=_cmd_spacing)

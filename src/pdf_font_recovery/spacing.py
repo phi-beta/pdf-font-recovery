@@ -371,19 +371,34 @@ def _check_against_reference(
 
 
 def check_directory(
-    directory: str, references: dict[str, str] | None = None
+    directory: str,
+    reference: str | None = None,
+    references: dict[str, str] | None = None,
 ) -> list[SpacingCheck]:
     """Check every font in a directory, in sorted order.
 
-    ``references`` maps a font FILE NAME to the path of the reference it
-    should be compared against.
+    ``reference`` names ONE reference font for every font in the
+    directory.  ``references`` maps a font FILE NAME to the reference
+    it should be compared against, which is what a manifest gives -
+    each weight has its own publisher file, and comparing a Bold
+    against a Regular is not a comparison.
+
+    A font with no reference is still checked against its own
+    siblings; it simply carries no reference comparison, and the
+    report says so.
     """
-    references = references or {}
+    per_font = references or {}
     checks = []
     for name in sorted(os.listdir(directory)):
         if not name.lower().endswith((".ttf", ".otf")):
             continue
-        checks.append(check_spacing(os.path.join(directory, name), references.get(name)))
+        path = os.path.join(directory, name)
+        # The manifest keys by the style's stem, which is the file name
+        # without its extension.
+        chosen = per_font.get(name) or per_font.get(os.path.splitext(name)[0])
+        if chosen is None and reference:
+            chosen = reference
+        checks.append(check_spacing(path, chosen))
     return checks
 
 
@@ -397,6 +412,14 @@ def summarise(checks: list[SpacingCheck]) -> dict:
         "mismatched": sum(len(c.mismatched) for c in checks),
         "compared": sum(c.compared for c in checks),
         "fonts_with_problems": sum(1 for c in checks if c.problems),
+        # A font with no reference is NOT a font that agrees with its
+        # reference - it is a font nobody checked against one.  The
+        # count has to be in the summary, or "0 disagreeing" reads as
+        # "every font agrees" when six fonts were never compared.
+        "fonts_without_reference": sum(1 for c in checks if not c.reference),
+        "fonts_without_comparison": sum(
+            1 for c in checks if c.reference and not c.compared
+        ),
     }
 
 
@@ -431,4 +454,14 @@ def format_report(checks: list[SpacingCheck]) -> str:
         f"{summary['inconsistent']} inconsistent letters, "
         f"{summary['mismatched']} disagreeing with their reference"
     )
+    # Say what was NOT checked.  A font with no reference is unchecked,
+    # not agreed - and a summary that omits that reads as a clean bill.
+    unchecked = summary["fonts_without_reference"] + summary["fonts_without_comparison"]
+    if unchecked:
+        lines.append(
+            f"  {unchecked} of {summary['fonts']} fonts were NOT compared with a "
+            f"reference ({summary['fonts_without_reference']} with no reference at "
+            f"all, {summary['fonts_without_comparison']} with a reference but no "
+            f"shared characters)"
+        )
     return "\n".join(lines)
