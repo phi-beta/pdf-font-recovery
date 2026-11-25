@@ -14,6 +14,7 @@ from fontTools.ttLib import TTFont
 
 from pdf_font_recovery import cff_borrow, extract, repair
 from pdf_font_recovery.verify import draws_anything
+from tests.conftest import empty_glyph
 
 # ----------------------------------------------------------------------
 # The AGL names.  A PDF subset names its punctuation ``exclam`` and
@@ -106,6 +107,76 @@ def test_the_cff_metrics_helper_is_shared_between_build_and_borrow():
 # answers False for every CFF glyph - which makes it useless as a guard
 # in a CFF code path.
 # ----------------------------------------------------------------------
+
+
+def test_a_character_the_font_cannot_draw_is_dropped(tmp_path):
+    """A mapped character with no outlines is worse than a missing one.
+
+    The Altone subset maps 178 accented characters whose glyphs are
+    empty.  Every coverage count counted them, and every renderer
+    produced nothing for them.
+    """
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+    from pdf_font_recovery.pipeline import strip_blank_characters
+
+    pen = TTGlyphPen(None)
+    pen.moveTo((100, 0))
+    pen.lineTo((100, 700))
+    pen.lineTo((700, 700))
+    pen.lineTo((700, 0))
+    pen.closePath()
+
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder([".notdef", "A", "eacute"])
+    builder.setupCharacterMap({65: "A", 0x00E9: "eacute"})
+    builder.setupGlyf({".notdef": empty_glyph(), "A": pen.glyph(), "eacute": empty_glyph()})
+    builder.setupHorizontalMetrics({".notdef": (500, 0), "A": (700, 0), "eacute": (500, 0)})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupNameTable({"familyName": "Test", "styleName": "Regular"})
+    builder.setupOS2()
+    builder.setupPost()
+    path = tmp_path / "Test.ttf"
+    builder.save(path)
+
+    assert 0x00E9 in TTFont(path).getBestCmap()
+    removed = strip_blank_characters(str(path))
+    assert removed == 1
+    # The character is gone, and the one that draws is still there.
+    cmap = TTFont(path).getBestCmap()
+    assert 0x00E9 not in cmap
+    assert 65 in cmap
+
+
+def test_whitespace_is_never_dropped(tmp_path):
+    """A space has no outlines by definition, and every face has one."""
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+    from pdf_font_recovery.pipeline import strip_blank_characters
+
+    pen = TTGlyphPen(None)
+    pen.moveTo((100, 0))
+    pen.lineTo((100, 700))
+    pen.lineTo((700, 700))
+    pen.lineTo((700, 0))
+    pen.closePath()
+
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder([".notdef", "A", "space"])
+    builder.setupCharacterMap({65: "A", 32: "space"})
+    builder.setupGlyf({".notdef": empty_glyph(), "A": pen.glyph(), "space": empty_glyph()})
+    builder.setupHorizontalMetrics({".notdef": (500, 0), "A": (700, 0), "space": (250, 0)})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupNameTable({"familyName": "Test", "styleName": "Regular"})
+    builder.setupOS2()
+    builder.setupPost()
+    path = tmp_path / "Test.ttf"
+    builder.save(path)
+
+    assert strip_blank_characters(str(path)) == 0
+    assert 32 in TTFont(path).getBestCmap()
 
 
 def test_draws_anything_works_for_a_cff_font(tmp_path):

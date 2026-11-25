@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 from . import cff_borrow, extract, normalise, repair, spacing, verify
 from .manifest import Manifest, StyleSpec, resolve_inputs
+from .verify import draws_anything
 
 #: A fixed timestamp used when the manifest does not supply one.
 #:
@@ -74,6 +75,52 @@ class PipelineResult:
             "summary": self.summary,
             "published": self.published,
         }
+
+
+def strip_blank_characters(path: str, reproducible_timestamp: int | None = None) -> int:
+    """Remove the characters a font maps but cannot draw.
+
+    A font may carry a character in its character map whose glyph has
+    no outlines.  The font then claims to have the character and
+    renders nothing for it - which is worse than not having it at all,
+    because the character is "present" for every coverage count.
+
+    The Altone Trial maps 389 characters and draws 200.  The other 189
+    are accents it has no outlines for.
+
+    Whitespace is exempt: a space has no outlines by definition, and
+    every text face has one.
+
+    Returns the number of characters removed.
+    """
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(path)
+    cmap = font.getBestCmap()
+
+    blank = []
+    for code, name in cmap.items():
+        if chr(code).isspace():
+            continue
+        if not draws_anything(font, name):
+            blank.append(code)
+    if not blank:
+        return 0
+
+    for table in font["cmap"].tables:
+        if not table.isUnicode():
+            continue
+        for code in blank:
+            if code in table.cmap:
+                del table.cmap[code]
+    # Saving re-stamps the font's timestamps, so they are pinned again.
+    # Without this the output differs between two runs of the same
+    # input, which is exactly what the determinism check looks for.
+    if reproducible_timestamp is not None:
+        extract.pin_timestamps(font, reproducible_timestamp)
+    font.recalcTimestamp = False
+    font.save(path)
+    return len(blank)
 
 
 def _is_cff(path: str) -> bool:
@@ -153,6 +200,19 @@ def run(
             out_path = os.path.join(staging, spec.stem + extension)
             try:
                 shutil.copyfile(spec.source_font, out_path)
+                # A publisher's file may MAP a character it cannot draw.
+                #
+                # The Altone Trial maps 389 characters and draws 200: the
+                # other 189 are accents it has no outlines for.  Copying
+                # the file as it stands carries those empty entries into
+                # the delivery, where each one is a character the font
+                # claims to have and cannot render.
+                stripped = strip_blank_characters(out_path, timestamp)
+                if stripped:
+                    log(
+                        f"      {style_key:26s} dropped {stripped} character(s) "
+                        f"the source maps but cannot draw"
+                    )
             except Exception as exc:
                 log(f"      FAIL {style_key:26s} {type(exc).__name__}: {exc}")
                 result.skipped.append(
@@ -420,6 +480,23 @@ def run(
     result.stages.append(StageReport("normalise", {"fonts": len(built)}).to_dict())
 
     # ---- verify
+    # ---- drop the characters the font maps but cannot draw
+    #
+    # A PDF subset carries a character map that reaches far beyond the
+    # outlines it sets: the Altone subset maps 178 accented characters
+    # whose glyphs are empty.  A font that claims a character and
+    # renders nothing for it is worse than one that does not have it,
+    # because every coverage count counts it.
+    log("[5a/6] blank-character strip")
+    for _spec, path, _fmt in built:
+        try:
+            stripped = strip_blank_characters(path, timestamp)
+        except Exception as exc:
+            log(f"      FAIL {os.path.basename(path)}: {type(exc).__name__}: {exc}")
+            continue
+        if stripped:
+            log(f"      {os.path.basename(path):30s} dropped {stripped}")
+
     log("[5/6] verify")
     checks = verify.check_directory(staging, manifest.test_characters)
     for check in checks:
