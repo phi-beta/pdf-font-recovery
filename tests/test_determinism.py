@@ -22,7 +22,7 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
 
-from pdf_font_recovery import extract
+from pdf_font_recovery import extract, pipeline
 
 
 def _outline():
@@ -124,7 +124,13 @@ def test_pinned_timestamp_is_recorded_in_the_font(tmp_path):
     # fontTools treats a head timestamp below 0x7C259DC0 (1 January 2084) as
     # a Macintosh epoch offset and shifts it on load, so a pinned value must
     # sit above that threshold to survive a round trip.
-    timestamp = 0x7C259DC0
+    #
+    # The value used here sits a DAY above the boundary rather than ON it.
+    # Whether "below" includes the boundary itself has changed between
+    # fontTools releases, so a value exactly on the threshold survives on
+    # one version and is shifted on the next - which is what the CI run
+    # showed.
+    timestamp = 0x7C259DC0 + 86400
     path = str(tmp_path / "a.ttf")
     _make_font(path)
     font = TTFont(path)
@@ -134,6 +140,19 @@ def test_pinned_timestamp_is_recorded_in_the_font(tmp_path):
     reread = TTFont(path)
     assert reread["head"].created == timestamp
     assert reread["head"].modified == timestamp
+
+
+def test_the_default_timestamp_survives_a_round_trip(tmp_path):
+    """The tool's own default has to survive being written and read back."""
+    path = str(tmp_path / "a.ttf")
+    _make_font(path)
+    font = TTFont(path)
+    extract.pin_timestamps(font, pipeline.DEFAULT_REPRODUCIBLE_TIMESTAMP)
+    font.save(path)
+
+    reread = TTFont(path)
+    assert reread["head"].created == pipeline.DEFAULT_REPRODUCIBLE_TIMESTAMP
+    assert reread["head"].modified == pipeline.DEFAULT_REPRODUCIBLE_TIMESTAMP
 
 
 def test_pinned_font_still_loads(tmp_path):

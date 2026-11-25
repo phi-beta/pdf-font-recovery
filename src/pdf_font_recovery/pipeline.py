@@ -34,7 +34,12 @@ from .verify import draws_anything
 #: a Macintosh epoch offset rather than a Unix timestamp, and shifts it on
 #: load.  A pinned value below that threshold would therefore not survive a
 #: round trip, so the default is comfortably above it.
-DEFAULT_REPRODUCIBLE_TIMESTAMP = 0x7C259DC0  # 2084-01-01T00:00:00Z
+#:
+#: The value used here sits a day ABOVE that boundary rather than ON it.
+#: Whether "below" includes the boundary itself has changed between
+#: fontTools releases, so a value exactly on the threshold survives on one
+#: version and is shifted on the next.
+DEFAULT_REPRODUCIBLE_TIMESTAMP = 0x7C259DC0 + 86400
 
 
 @dataclass
