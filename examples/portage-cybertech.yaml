@@ -1,190 +1,306 @@
-# The Portage CyberTech corpus: the first fixture for pdf-font-recovery.
+# The Portage CyberTech corpus: the reference fixture for pdf-font-recovery.
 #
-# Four families, both embedded formats, and two of the interesting defect
-# classes:
+# Four families, thirty styles, both embedded formats, and several of the
+# defect classes the tool exists to repair:
 #
-#   * Altone   - the PDF subsets have EMPTY outlines for every character no
-#                document set, and the publisher's trial has PLACEHOLDER
-#                digits (one shared bounding box).  Repair needs the union
-#                across documents plus a fill from the trial that excludes
-#                the placeholders.
-#   * Mundial  - the PDF subsets are CFF, so they need merging and a fresh
-#                OpenType container.
-#   * Cellofy  - CFF, one style, complete in the PDF.
-#   * Proxima Nova - the IDC report author's font, not a Portage family.  Its
-#                CFF subsets only cover ~85 characters between them, so it
-#                is inherently partial.
+#   * Altone    - the PDF subsets have EMPTY outlines for every character
+#                 no document set, and the publisher's trial has PLACEHOLDER
+#                 digits (one shared bounding box).  Repair needs the union
+#                 across documents plus a fill from the trial that excludes
+#                 the placeholders.
+#   * Mundial   - the PDF subsets are CFF, so they need merging and a fresh
+#                 OpenType container.  The publisher's demo package ships a
+#                 figure FOUR that is a fragment - a third of the height -
+#                 and the repair replaces it.
+#   * Cellofy   - CFF, one style.  A family with a single style still
+#                 needs the reference for the characters it lacks.
+#   * ProximaNova - the IDC report author's font, not a Portage family.
+#                 Its CFF subsets only cover ~85 characters between them,
+#                 so it is inherently partial.
 #
 # Arial Black and Baskerville Old Face are standard Windows fonts, already
 # installed; the PDF copies of them are stripped subsets with no cmap and no
 # OS/2.  They are skipped rather than shipped broken.
+#
+# The corpus contributes 22 styles.  The other 8 - the Hair, the Italic
+# variants, Altone's Bold Oblique - are in the publishers' own demo
+# packages and are COPIED through 'source_font' rather than reconstructed.
+#
+# A base font with 'styles' named backs those styles.  One with no 'styles'
+# backs every style in the family that nothing else claims - the
+# family-level default.
 
 version: 1
 name: portage-cybertech
 
 inputs:
   - "E:/Clients/Portage Cybertech/public docs/**/*.pdf"
+  - "E:/Clients/Portage Cybertech/artifacts/**/*.pdf"
 
 output_dir: "E:/Clients/Portage Cybertech/artifacts/all/fonts"
 
 reproducible_timestamps: true
 
+test_characters: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,;:!?'\"()[]{}-–—/&@#%+=*<>|~^_$€£¥°•…éèêëàâäçôûùüïîöÉÀÇÜÑßœæ“”‘’"
+
 families:
+
+  # ------------------------------------------------------------------
+  # Altone.  The PDF subsets have EMPTY outlines for every character no
+  # document set, so the trial fills them.  The trial's ten digits are one
+  # shared placeholder box, and the repair refuses to copy those - the
+  # figures come from a sibling weight instead.
+  # ------------------------------------------------------------------
   Altone:
-    styles:
+    base_fonts:
       Altone-Regular:
         family: Altone
-        subfamily: Regular
-        weight: 400
+        path: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Regular.ttf"
+        exact_weight: true
+        license: personal-use trial
+        styles:
+          - Altone-Regular
+      Altone-Bold:
+        family: Altone
+        path: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Bold.ttf"
+        exact_weight: true
+        license: personal-use trial
+        styles:
+          - Altone-Bold
+      Altone-Oblique:
+        family: Altone
+        path: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Oblique.ttf"
+        exact_weight: false
+        license: personal-use trial
+        styles:
+          - Altone-RegularOblique
+          - Altone-MediumOblique
+          - Altone-SemiBoldOblique
+      Altone-BoldOblique:
+        family: Altone
+        path: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-BoldOblique.ttf"
+        exact_weight: false
+        license: personal-use trial
+        styles:
+          - Altone-BoldOblique
+      Altone-Default:
+        family: Altone
+        path: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Regular.ttf"
+        exact_weight: false
+        license: personal-use trial
+        styles:
+          - Altone-Light
+          - Altone-Medium
+          - Altone-SemiBold
+    styles:
       Altone-Light:
         family: Altone
         subfamily: Light
         weight: 300
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Regular.ttf"
+      Altone-Regular:
+        family: Altone
+        subfamily: Regular
+        weight: 400
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Regular.ttf"
       Altone-Medium:
         family: Altone
         subfamily: Medium
         weight: 500
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Regular.ttf"
       Altone-SemiBold:
         family: Altone
         subfamily: SemiBold
         weight: 600
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Bold.ttf"
       Altone-Bold:
         family: Altone
         subfamily: Bold
         weight: 700
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Bold.ttf"
       Altone-RegularOblique:
         family: Altone
         subfamily: Italic
         weight: 400
         italic: true
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Oblique.ttf"
       Altone-MediumOblique:
         family: Altone
         subfamily: Medium Italic
         weight: 500
         italic: true
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Oblique.ttf"
       Altone-SemiBoldOblique:
         family: Altone
         subfamily: SemiBold Italic
         weight: 600
         italic: true
-    base_fonts:
-      Altone-Regular:
-        path: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Regular.ttf"
-        exact_weight: true
-        license: personal-use trial
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-Oblique.ttf"
+      Altone-BoldOblique:
+        family: Altone
+        subfamily: Bold Italic
+        weight: 700
+        italic: true
+        source_font: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-BoldOblique.ttf"
+        reference: "C:/TEMP/fontdl/altone-6004-3aa6a10df4b2/Altone Trial-BoldOblique.ttf"
 
+  # ------------------------------------------------------------------
+  # Mundial.  The publisher's demo package carries all fourteen styles.
+  # ------------------------------------------------------------------
   Mundial:
+    base_fonts:
+      Mundial-Default:
+        family: Mundial
+        path: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-4-mundial-regular-tty.otf"
+        exact_weight: false
+        license: publisher demo
+        styles:
+          - Mundial-Hair
+          - Mundial-Thin
+          - Mundial-Light
+          - Mundial-Regular
+          - Mundial-DemiBold
+          - Mundial-Bold
+          - Mundial-Black
+          - Mundial-Italic
+          - Mundial-HairItalic
+          - Mundial-ThinItalic
+          - Mundial-LightItalic
+          - Mundial-DemiBoldItalic
+          - Mundial-BoldItalic
+          - Mundial-BlackItalic
     styles:
       Mundial-Hair:
         family: Mundial
         subfamily: Hair
-        weight: 100
+        output_name: Mundial-Hair
+        weight: 200
+        source_font: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-1-mundial-hair-tty.otf"
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-1-mundial-hair-tty.otf"
       Mundial-Thin:
         family: Mundial
         subfamily: Thin
-        weight: 100
+        weight: 200
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-2-mundial-thin-tty.otf"
       Mundial-Light:
         family: Mundial
         subfamily: Light
-        weight: 200
+        weight: 300
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-3-mundial-light-tty.otf"
       Mundial-Regular:
         family: Mundial
         subfamily: Regular
         weight: 400
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-4-mundial-regular-tty.otf"
       Mundial-DemiBold:
         family: Mundial
         subfamily: DemiBold
         weight: 600
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-5-mundial-demibold-tty.otf"
       Mundial-Bold:
         family: Mundial
         subfamily: Bold
         weight: 700
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-6-mundial-bold-tty.otf"
       Mundial-Black:
         family: Mundial
         subfamily: Black
         weight: 900
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-7-mundial-black-tty.otf"
       Mundial-HairItalic:
         family: Mundial
         subfamily: Hair Italic
-        weight: 100
+        output_name: Mundial-HairItalic
+        weight: 200
         italic: true
+        source_font: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-1-mundial-hair-italic-tty.otf"
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-1-mundial-hair-italic-tty.otf"
       Mundial-ThinItalic:
         family: Mundial
         subfamily: Thin Italic
-        weight: 100
+        weight: 200
         italic: true
+        source_font: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-2-mundial-thin-italic-tty.otf"
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-2-mundial-thin-italic-tty.otf"
       Mundial-LightItalic:
         family: Mundial
         subfamily: Light Italic
-        weight: 200
+        weight: 300
         italic: true
+        source_font: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-3-mundial-light-italic-tty.otf"
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-3-mundial-light-italic-tty.otf"
       Mundial-Italic:
         family: Mundial
         subfamily: Italic
         weight: 400
         italic: true
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-4-mundial-regular-italic-tty.otf"
       Mundial-DemiBoldItalic:
         family: Mundial
         subfamily: DemiBold Italic
         weight: 600
         italic: true
+        source_font: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-5-mundial-demibold-italic-tty.otf"
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-5-mundial-demibold-italic-tty.otf"
       Mundial-BoldItalic:
         family: Mundial
         subfamily: Bold Italic
         weight: 700
         italic: true
+        source_font: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-6-mundial-bold-italic-tty.otf"
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-6-mundial-bold-italic-tty.otf"
       Mundial-BlackItalic:
         family: Mundial
         subfamily: Black Italic
         weight: 900
         italic: true
+        source_font: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-7-mundial-black-italic-tty.otf"
+        reference: "C:/TEMP/fontdl/dafontstyle-mundial/Demo_Fonts/Fontspring-DEMO-7-mundial-black-italic-tty.otf"
 
+  # ------------------------------------------------------------------
+  # Cellofy Bold.  A Type1 CFF font in every document that sets it.
+  # ------------------------------------------------------------------
   Cellofy:
     styles:
       Cellofy-Bold:
         family: Cellofy
         subfamily: Bold
         weight: 700
-        # The publisher's own file for this weight.  Naming a reference
-        # turns the letter-spacing check from self-consistent into
-        # authoritative: the recovered font is compared with the source
-        # it was recovered from, like for like.
-        #
-        # The reference must be the SAME weight - an oblique is compared
-        # with an oblique.  Comparing an italic with an upright tells
-        # you about the slant, not about the recovery.
         reference: "C:/TEMP/fontdl/cellofy/cellofy.bold.otf"
 
-  Proxima Nova:
+  # ------------------------------------------------------------------
+  # Proxima Nova.  A commercial family: only the characters the documents
+  # set are recoverable.  The figures are borrowed from a sibling weight,
+  # which is why the Italic carries upright figures.
+  # ------------------------------------------------------------------
+  ProximaNova:
+    skip:
+      Arial-Black: "installed on Windows; the PDF copy is a stripped subset"
+      BaskOldFace: "installed on Windows; the PDF copy is a stripped subset"
+      Times-Roman: "a PDF base-14 font, not a brand family"
     styles:
       ProximaNova-Light:
-        family: Proxima Nova
+        family: ProximaNova
         subfamily: Light
         weight: 300
-        origin: IDC report author
       ProximaNova-Regular:
-        family: Proxima Nova
+        family: ProximaNova
         subfamily: Regular
         weight: 400
-        origin: IDC report author
       ProximaNova-RegularIt:
-        family: Proxima Nova
+        family: ProximaNova
         subfamily: Italic
         weight: 400
         italic: true
-        origin: IDC report author
       ProximaNova-Semibold:
-        family: Proxima Nova
-        subfamily: Semibold
+        family: ProximaNova
+        subfamily: SemiBold
         weight: 600
-        origin: IDC report author
       ProximaNova-Bold:
-        family: Proxima Nova
+        family: ProximaNova
         subfamily: Bold
         weight: 700
-        origin: IDC report author
       ProximaNova-Extrabld:
-        family: Proxima Nova
+        family: ProximaNova
         subfamily: ExtraBold
         weight: 800
-        origin: IDC report author
