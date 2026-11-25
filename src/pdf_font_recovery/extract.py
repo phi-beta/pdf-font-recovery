@@ -178,19 +178,94 @@ def merge_cff(chunks: list[EmbeddedFont]) -> tuple[object, dict, int, str] | Non
     return base, merged, added, base_source
 
 
-def cff_metrics(top) -> tuple[int, int, int]:
-    """Return (design_units, nominalWidthX, defaultWidthX) implied by the CFF."""
-    design_units = 1000
+def cff_metrics(top, charstrings: dict | None = None) -> tuple[int, int, int]:
+    """Return (design_units, nominalWidthX, defaultWidthX) implied by the CFF.
+
+    The design units are what the CFF's own widths are measured in.  They
+    come from the FontMatrix: a matrix of 1/2048 means the widths are in
+    2048-unit space.
+
+    A CFF with NO FontMatrix is the common case for an embedded PDF font,
+    and then the design units have to be INFERRED.  Guessing is not safe:
+    a wrong guess scales every width, and the font still loads and passes
+    every structural check while the letters land on top of each other.
+
+    The inference uses the font's own widths.  A design space has to be
+    big enough to hold the font's widest advance, so the smallest
+    conventional space (1000) that fits is the answer:
+
+      * the PDF's Cellofy has a widest advance of 983 - it fits in 1000
+        units, so it is a 1000-unit font.  The publisher's own file agrees:
+        upem 1000, same advances.
+      * the PDF's Mundial has a widest advance of about 2010 - it does not
+        fit in 1000, so it is a 2048-unit font.
+
+    When there is no FontMatrix and no charstrings to measure, 2048 is
+    used: the embedded fonts in this corpus are overwhelmingly Type1
+    outlines in 2048-unit space.
+    """
     font_matrix = (top.rawDict or {}).get("FontMatrix")
     if font_matrix and font_matrix[0]:
         design_units = int(round(1.0 / font_matrix[0]))
+    else:
+        design_units = _infer_design_units(top, charstrings)
     private = top.Private.rawDict or {}
     return design_units, private.get("nominalWidthX", 0), private.get("defaultWidthX", 0)
 
 
+#: The conventional design spaces, smallest first.  The first one that can
+#: hold the font's widest advance is the answer.
+CONVENTIONAL_DESIGN_UNITS = (1000, 2048)
+
+
+def _infer_design_units(top, charstrings: dict | None) -> int:
+    """Infer the CFF's design units from the widths it actually carries."""
+    widest = 0
+    if charstrings:
+        try:
+            from fontTools.misc.psCharStrings import T2WidthExtractor
+
+            private = top.Private.rawDict or {}
+            local = getattr(top.Private, "Subrs", None) or []
+            for charstring in charstrings.values():
+                try:
+                    extractor = T2WidthExtractor(
+                        local,
+                        top.GlobalSubrs,
+                        private.get("nominalWidthX", 0),
+                        private.get("defaultWidthX", 0),
+                        top.Private,
+                    )
+                    extractor.execute(charstring)
+                    widest = max(widest, int(extractor.width or 0))
+                except Exception:
+                    continue
+        except Exception:
+            widest = 0
+
+    if widest <= 0:
+        # Nothing to measure: fall back to the widest advance in the
+        # private dict, which is the font's own statement about its
+        # width space.
+        private = top.Private.rawDict or {}
+        widest = max(
+            int(private.get("nominalWidthX", 0) or 0),
+            int(private.get("defaultWidthX", 0) or 0),
+        )
+
+    for units in CONVENTIONAL_DESIGN_UNITS:
+        if widest <= units:
+            return units
+    # Wider than any conventional space: round up to the next power of two.
+    units = 1000
+    while units < widest:
+        units *= 2
+    return units
+
+
 def compute_widths(top, charstrings: dict, upem: int) -> dict[str, int]:
     """Advance width of every glyph, scaled from the CFF design space to upem."""
-    design_units, nominal, default = cff_metrics(top)
+    design_units, nominal, default = cff_metrics(top, charstrings)
     local = top.Private.Subrs if getattr(top.Private, "Subrs", None) else []
     glob = top.GlobalSubrs if top.GlobalSubrs is not None else []
     scale = upem / float(design_units)
@@ -248,7 +323,7 @@ def build_otf(
     # Build the container at the CFF's own design units so that the
     # FontMatrix (1/design_units) and the charstring widths agree with no
     # scaling.
-    design_units, _nominal, _default = cff_metrics(top)
+    design_units, _nominal, _default = cff_metrics(top, charstrings)
     upem = design_units
 
     # ---- build the CFF table by hand (FontBuilder.setupCFF wants a

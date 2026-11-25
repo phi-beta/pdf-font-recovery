@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 
 from fontTools.ttLib import TTFont
 
-from .verify import find_placeholder_characters, glyph_bounds, has_ink
+from .verify import draws_anything, find_placeholder_characters, glyph_bounds
 
 
 @dataclass
@@ -197,7 +197,7 @@ def _union_true_type_styles(
                     added.append(char)
                 continue
             # Present but possibly blank: only replace when the target is blank.
-            if not has_ink(target, target_name) and has_ink(source_font, source_name):
+            if not draws_anything(target, target_name) and draws_anything(source_font, source_name):
                 # _copy_glyph has already set the metrics from the source.
                 if _copy_glyph(source_font, source_name, target, target_name, set()):
                     added.append(char)
@@ -248,7 +248,7 @@ def repair_style(
                 # A placeholder box is worse than a blank - it renders as a
                 # box with a letter in it.  Never copy one across.
                 continue
-            if not has_ink(external, external_name):
+            if not draws_anything(external, external_name):
                 continue
             target_name = target_cmap.get(code)
             if target_name is None:
@@ -261,7 +261,7 @@ def repair_style(
                     else:
                         report.borrowed.append(char)
                 continue
-            if not has_ink(font, target_name):
+            if not draws_anything(font, target_name):
                 if _copy_glyph(external, external_name, font, target_name, set()):
                     if external_exact_weight:
                         report.overlaid.append(char)
@@ -284,7 +284,7 @@ def repair_style(
         # Whitespace is legitimately empty.
         if char.isspace():
             continue
-        if not has_ink(verify, name):
+        if not draws_anything(verify, name):
             report.still_blank.append(char)
     return report
 
@@ -313,12 +313,17 @@ def borrow_across_weights(
             continue
         sibling = TTFont(sibling_path)
         sibling_cmap = sibling.getBestCmap()
+        # A sibling's PLACEHOLDER box is worse than a blank: it
+        # renders as a box with a letter in it.  Never borrow one.
+        sibling_placeholders = find_placeholder_characters(sibling)
         for code, sibling_name in sibling_cmap.items():
             char = chr(code)
-            target_name = target_cmap.get(code)
-            if target_name is not None and has_ink(font, target_name):
+            if code in sibling_placeholders:
                 continue
-            if not has_ink(sibling, sibling_name):
+            target_name = target_cmap.get(code)
+            if target_name is not None and draws_anything(font, target_name):
+                continue
+            if not draws_anything(sibling, sibling_name):
                 continue
             if target_name is None:
                 new_name = f"uni{code:04X}"
@@ -326,7 +331,7 @@ def borrow_across_weights(
                     _add_to_glyph_order(font, new_name)
                     target_cmap[code] = new_name
                     report.borrowed.append(char)
-            elif not has_ink(font, target_name):
+            elif not draws_anything(font, target_name):
                 if _copy_glyph(sibling, sibling_name, font, target_name, set()):
                     report.borrowed.append(char)
 
@@ -341,7 +346,7 @@ def borrow_across_weights(
         # Whitespace is legitimately empty.
         if char.isspace():
             continue
-        if not has_ink(verify, name):
+        if not draws_anything(verify, name):
             report.still_blank.append(char)
     return report
 
@@ -380,7 +385,7 @@ def union_style_across_documents(
                     target_cmap[code] = new_name
                     _set_metrics(font, new_name, 0)
                     report.filled.append(char)
-            elif not has_ink(font, target_name) and has_ink(source, source_name):
+            elif not draws_anything(font, target_name) and draws_anything(source, source_name):
                 if _copy_glyph(source, source_name, font, target_name, set()):
                     _set_metrics(font, target_name, 0)
                     report.filled.append(char)
@@ -396,7 +401,7 @@ def find_blank_characters(path: str, test_characters: str) -> list[str]:
     blank = []
     for char in test_characters:
         name = cmap.get(ord(char))
-        if name is not None and not has_ink(font, name):
+        if name is not None and not draws_anything(font, name):
             blank.append(char)
     return blank
 
@@ -408,6 +413,6 @@ def find_empty_glyphs(path: str) -> list[str]:
     for name in font.getGlyphOrder():
         if name == ".notdef":
             continue
-        if glyph_bounds(font, name) == (0, 0, 0, 0) and not has_ink(font, name):
+        if glyph_bounds(font, name) == (0, 0, 0, 0) and not draws_anything(font, name):
             empty.append(name)
     return empty

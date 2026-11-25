@@ -44,9 +44,13 @@ from __future__ import annotations
 import copy
 import os
 
+from fontTools.agl import AGL2UV
 from fontTools.misc.psCharStrings import T2WidthExtractor
 from fontTools.ttLib import TTFont, newTable
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+
+from . import extract
+from .verify import draws_anything, glyph_bounds
 
 #: The suffix appended to a borrowed glyph's name.
 BORROW_MARK = "borrow"
@@ -69,11 +73,32 @@ def desubroutinize(cff) -> None:
     _desubroutinize(cff)
 
 
+#: The standard ligature code points, by their Adobe Glyph List name.
+#:
+#: The AGL does not carry them - ``fi`` and ``fl`` are ligatures, not
+#: letters - but a PDF subset names its ligature glyphs exactly this way,
+#: and a font that carries ``fi`` without mapping it is a font whose
+#: ligature is invisible to every text engine.
+LIGATURE_CODE_POINTS = {
+    "ff": 0xFB00,
+    "fi": 0xFB01,
+    "fl": 0xFB02,
+    "ffi": 0xFB03,
+    "ffl": 0xFB04,
+    "st": 0xFB06,
+}
+
+
 def _unicode_of(glyph_name: str) -> str | None:
     """The text a glyph name maps to, or None if it maps to nothing.
 
-    Handles the AGL names (``A``, ``uni0041``), the ``uXXXX`` form, and
-    the ``uniXXXX.suffix`` form this module creates for borrowed glyphs.
+    Handles the AGL names (``A``, ``exclam``, ``zero``), the ``uXXXX``
+    form, and the ``uniXXXX.suffix`` form this module creates for
+    borrowed glyphs.
+
+    The AGL names matter: a PDF subset names its glyphs ``exclam`` and
+    ``numbersign``, not ``!`` and ``#``, and a name the reader cannot
+    resolve is a character the font silently does not carry.
     """
     if not glyph_name:
         return None
@@ -91,7 +116,19 @@ def _unicode_of(glyph_name: str) -> str | None:
             return chr(int(name[1:], 16))
         except ValueError:
             return None
-    return name if len(name) == 1 else None
+    if len(name) == 1:
+        return name
+    # The standard ligatures.  The AGL has no entry for them, but a PDF
+    # subset names its ligature glyphs exactly this way.
+    code = LIGATURE_CODE_POINTS.get(name)
+    if code is not None:
+        return chr(code)
+    # The Adobe Glyph List.  It is the naming convention PDF subsetters
+    # use for punctuation and figures, and fontTools ships the table.
+    code = AGL2UV.get(name)
+    if code is not None:
+        return chr(code)
+    return None
 
 
 def _char_key(text: str) -> str:
@@ -128,6 +165,13 @@ def collect_style_glyphs(paths: list[str]) -> dict[str, tuple]:
     the FIRST file in ``paths`` winning for any character it provides.
     The order of ``paths`` is therefore significant, and callers pass a
     sorted list.
+
+    There is one exception to "first wins".  A donor whose glyph is a
+    FRAGMENT - a figure that reaches only a third of the way up - is
+    stepped over in favour of a later donor's complete version of the
+    same character.  The publisher's demo package ships every weight
+    with a truncated figure four, so without this the first donor wins
+    with the broken glyph and the family inherits it.
     """
     out: dict[str, tuple] = {}
     for path in paths:
@@ -146,9 +190,86 @@ def collect_style_glyphs(paths: list[str]) -> dict[str, tuple]:
                 continue
             key = _char_key(text)
             if key in out:
-                continue
+                # A later donor may carry a COMPLETE version of a
+                # character the first donor set as a fragment.  The
+                # later donor wins only when its own glyph is NOT a
+                # fragment - that is, only when it is actually an
+                # improvement.
+                if _is_fragment(font, glyph_name, key):
+                    continue
+                if not _is_fragment_in(out[key], font, glyph_name, key):
+                    continue
             out[key] = (charstrings[glyph_name], top, cff)
     return out
+
+
+def _is_fragment_in(entry: tuple, font: TTFont, glyph_name: str, key: str) -> bool:
+    """Is the charstring already in ``entry`` a fragment?
+
+    The entry is a charstring rather than a glyph in a font, so the
+    height has to be measured from the charstring itself.
+    """
+    charstring, top, _cff = entry
+    try:
+        bounds = _charstring_bounds(charstring, top)
+    except Exception:
+        return False
+    if not bounds:
+        return False
+    group = _GROUP_OF.get(key)
+    if group is None:
+        return False
+    heights = _group_heights(font, group)
+    if len(heights) < 4:
+        return False
+    values = sorted(heights.values())
+    median = values[len(values) // 2]
+    if median <= 0:
+        return False
+    return (bounds[3] - bounds[1]) < median * 0.6
+
+
+def _charstring_bounds(charstring, top) -> tuple | None:
+    """The bounding box of a charstring, drawn with a bounds pen."""
+    from fontTools.pens.boundsPen import BoundsPen
+
+    try:
+        pen = BoundsPen(None)
+        charstring.draw(pen)
+        return pen.bounds
+    except Exception:
+        return None
+
+
+def _measure_width(charstring, top) -> int | None:
+    """The advance width of a charstring, in ITS OWN design space.
+
+    The width is measured with the charstring's OWN private dictionary and
+    global subrs, because that is what the charstring was compiled
+    against.  A charstring with no explicit width takes the
+    nominalWidthX of the font it belongs to - so measuring a donor's
+    charstring with the TARGET's private dictionary gives the target's
+    nominal width, not the donor's.
+    """
+    try:
+        private = top.Private.rawDict or {}
+        local = getattr(top.Private, "Subrs", None) or []
+        extractor = T2WidthExtractor(
+            local,
+            top.GlobalSubrs,
+            private.get("nominalWidthX", 0),
+            private.get("defaultWidthX", 0),
+            top.Private,
+        )
+        extractor.execute(charstring)
+        return int(extractor.width)
+    except Exception:
+        return None
+
+
+def _donor_design_units(top) -> int:
+    """The design space the donor's widths are measured in."""
+    return extract.cff_metrics(top)[0]
 
 
 def borrow_characters(
@@ -181,35 +302,93 @@ def borrow_characters(
 
     union = collect_style_glyphs(donor_paths)
 
+    # The target's own design units.  A donor's widths are measured in
+    # the DONOR's space, so this is what they have to be scaled into.
+    target_units = extract.cff_metrics(top, charstrings)[0]
+
     # ---- overlay the donors' versions of the style's OWN characters
     #
     # The style's own glyphs win on a tie, but a donor may carry a better
-    # outline for a character the style sets as a blank placeholder.
-    for key, (donor_charstring, _donor_top, _donor_cff) in union.items():
+    # outline for a character the style sets as a BLANK - which is what a
+    # PDF subset's unset character looks like.
+    #
+    # A donor's charstring is only used to REPLACE a blank.  A glyph the
+    # style already draws is left alone: the style's own outline is the
+    # licensed one, and replacing it with a different weight's outline
+    # silently changes the letterforms.  That is how a publisher's Hair
+    # ends up wearing the Thin's 'j'.
+    for key, (donor_charstring, donor_top, _donor_cff) in union.items():
         glyph_name = own.get(key)
         if glyph_name is None:
             continue
+        # A glyph the style already draws is left alone: the style's own
+        # outline is the licensed one, and replacing it with a different
+        # weight's outline silently changes the letterforms.  That is how
+        # a publisher's Hair ends up wearing the Thin's 'j'.
+        #
+        # There are two exceptions, and both are cases where the style's
+        # own glyph is DEFECTIVE rather than merely different:
+        #
+        #   - it draws NOTHING (a blank), or
+        #   - it is a FRAGMENT (a figure that reaches only a third of the
+        #     way up, which is what the publisher's demo package shipped
+        #     for every weight's figure four).
+        #
+        # In both cases a donor's complete glyph is strictly better.
+        if draws_anything(font, glyph_name):
+            if not _is_fragment(font, glyph_name, key):
+                continue
         try:
             copied = copy.deepcopy(donor_charstring)
             copied.private = private
             copied.globalSubrs = global_subrs
             charstrings[glyph_name] = copied
+            # The replaced glyph now IS the donor's glyph, so it advances
+            # the donor's way.  Leaving the target's advance behind would
+            # make a complete figure sit in a fragment's space - which
+            # the spacing check then reads as an inconsistent letter.
+            donor_width = _measure_width(donor_charstring, donor_top)
+            if donor_width is not None:
+                # The donor's width is in the DONOR's design space.  When
+                # that is not the target's - a 1000-unit donor into a
+                # 2048-unit target - the width has to be scaled, or the
+                # glyph advances at the wrong rate.
+                donor_units = extract.cff_metrics(donor_top)[0]
+                if donor_units and donor_units != target_units:
+                    donor_width = int(round(donor_width * target_units / donor_units))
+                _set_borrow_width(font, glyph_name, donor_width)
             result["overlay"] += 1
         except Exception as exc:
             result["errors"].append(f"overlay {key!r}: {type(exc).__name__}: {exc}")
 
     # ---- borrow the characters the style does not have at all
-    for key, (donor_charstring, _donor_top, _donor_cff) in union.items():
+    #
+    # A borrowed glyph's width is measured in the DONOR's design space and
+    # has to be scaled into the TARGET's.  The two are not always the
+    # same: a 1000-unit donor borrowed into a 2048-unit target needs its
+    # width doubled, and without the scale the glyph advances half as far
+    # as it should - the letters overlap.
+    for key, (donor_charstring, donor_top, _donor_cff) in union.items():
         if key in own:
             continue
         new_name = f"uni{ord(key):04X}.{BORROW_MARK}"
         if new_name in charstrings.keys():
+            continue
+        if not _is_borrowable(key):
+            # A control character has no place in a text face, and its
+            # measured width can be negative, which no advance width can
+            # be.  These are PDF artefacts, not text.
             continue
         try:
             copied = copy.deepcopy(donor_charstring)
             copied.private = private
             copied.globalSubrs = global_subrs
             charstrings[new_name] = copied
+            donor_width = _measure_width(donor_charstring, donor_top)
+            if donor_width is not None:
+                donor_units = _donor_design_units(donor_top)
+                scaled = int(round(donor_width * target_units / float(donor_units)))
+                _set_borrow_width(font, new_name, scaled)
             result["borrowed"] += 1
         except Exception as exc:
             result["errors"].append(f"borrow {key!r}: {type(exc).__name__}: {exc}")
@@ -226,6 +405,94 @@ def borrow_characters(
         pin_timestamps(font, reproducible_timestamp)
     font.save(path)
     return result
+
+
+def _is_fragment(font: TTFont, glyph_name: str, key: str) -> bool:
+    """Is this glyph a fragment of the character it should be?
+
+    A fragment is a glyph far smaller than the characters beside it in
+    the same class - a figure that reaches only a third of the way up
+    when its siblings reach the full height.  It has ink, so the ink
+    check passes it; it is not a shared box, so the placeholder check
+    passes it; and it carries the right name and advance, so nothing else
+    notices.
+
+    The comparison is made within the figures, and within the capitals,
+    because a figure and a capital are legitimately different heights.
+    """
+    group = _GROUP_OF.get(key)
+    if group is None:
+        return False
+    siblings = _group_heights(font, group)
+    if len(siblings) < 4:
+        return False
+    try:
+        bounds = glyph_bounds(font, glyph_name)
+    except Exception:
+        return False
+    if not bounds:
+        return False
+    values = sorted(siblings.values())
+    median = values[len(values) // 2]
+    if median <= 0:
+        return False
+    return (bounds[3] - bounds[1]) < median * 0.6
+
+
+def _group_heights(font: TTFont, group: str) -> dict[str, int]:
+    """The height of each character in a group, for the comparison."""
+    cmap = font.getBestCmap()
+    heights: dict[str, int] = {}
+    for char in group:
+        name = cmap.get(ord(char))
+        if not name:
+            continue
+        try:
+            bounds = glyph_bounds(font, name)
+        except Exception:
+            continue
+        if bounds:
+            heights[char] = bounds[3] - bounds[1]
+    return heights
+
+
+#: The characters that are compared with each other, by their first
+#: character.  A figure is judged against the figures; a capital against
+#: the capitals.
+_GROUP_OF = {
+    **{c: "0123456789" for c in "0123456789"},
+    **{c: "ABCDEFGHIJKLMNOPQRSTUVWXYZ" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+}
+
+
+def _is_borrowable(key: str) -> bool:
+    """Is this character one a text face may carry?
+
+    Control characters are excluded.  Several of them - backspace in
+    particular - measure a NEGATIVE advance width, which no advance
+    width can be, and fontTools refuses to compile one.
+    """
+    if len(key) != 1:
+        return False
+    code = ord(key)
+    if code < 0x20 or code == 0x7F:
+        return False
+    return True
+
+
+def _set_borrow_width(font: TTFont, name: str, width: int) -> None:
+    """Record the advance width of a borrowed glyph.
+
+    The width is set HERE, at the point the glyph is copied, because that
+    is the only place the DONOR's design space is known.  A width computed
+    later - from the merged charstrings and the target's private dict -
+    measures the donor's charstring in the TARGET's width space, which
+    is a different number.
+    """
+    try:
+        font["hmtx"].metrics[name] = (int(width), 0)
+    except Exception:
+        pass
 
 
 def _extend_glyph_order(font: TTFont, charstrings) -> None:
@@ -300,18 +567,19 @@ def _ensure_metrics(font: TTFont, charstrings, top) -> None:
     A borrowed glyph needs the width of the glyph it came from, so the
     width is measured from the charstring.  The measurement is scaled from
     the CFF's own design units, which are not necessarily 1000.
+
+    The design units come from :func:`extract.cff_metrics`, NOT from a
+    second implementation here.  When the two disagree the widths are
+    scaled by the ratio of their answers - and the borrow path's answer
+    was 1000 where the build path's was 2048, so every borrowed width
+    came out 2.048x too wide and the letters landed on top of each
+    other.
     """
     hmtx = font["hmtx"]
 
-    design_units = 1000
-    font_matrix = (top.rawDict or {}).get("FontMatrix")
-    if font_matrix and font_matrix[0]:
-        design_units = int(round(1.0 / font_matrix[0]))
+    design_units, nominal, default = extract.cff_metrics(top, charstrings)
     scale = font["head"].unitsPerEm / float(design_units)
 
-    private_raw = (top.Private.rawDict or {}) if top.Private else {}
-    nominal = private_raw.get("nominalWidthX", 0)
-    default = private_raw.get("defaultWidthX", 0)
     local = getattr(top.Private, "Subrs", None) or []
 
     for glyph_name in charstrings.keys():

@@ -60,6 +60,11 @@ class StyleSpec:
     #: own file for this weight, if there is one.  It is what makes the
     #: spacing check authoritative rather than merely self-consistent.
     reference: str | None = None
+    #: A file that IS this style, used when no document in the corpus
+    #: embeds it.  The publisher's own demo package carries the weights
+    #: and obliques a document never sets - the Hair, the Italic - and
+    #: those are copied rather than reconstructed.
+    source_font: str | None = None
 
     @property
     def stem(self) -> str:
@@ -80,11 +85,16 @@ class BaseFontSpec:
     When it is not - the only trial available is Regular but the style is
     SemiBold - the PDF is the base and the external font fills the gaps,
     which means those characters carry the external font's licence.
+
+    ``styles`` names the styles this file backs.  When it is empty the
+    file backs every style in the family that has no base font of its
+    own, which is what a family-level default means.
     """
 
     path: str
     exact_weight: bool = False
     license: str | None = None
+    styles: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -99,6 +109,35 @@ class FamilySpec:
     #: Characters expected to be present.  The coverage gate warns when a
     #: family falls short of its own expectation.
     expect_characters: str | None = None
+
+    def base_font_for(self, style_key: str) -> BaseFontSpec | None:
+        """The base font that backs a style, if any.
+
+        Three forms, in priority order:
+
+        1.  A base font NAMED after the style backs that style.  This is
+            the simplest form and it wins outright.
+
+        2.  A base font whose ``styles`` list names the style backs it.
+            This is how one file backs several styles - the Altone trial
+            ships Regular, Bold, Oblique and BoldOblique, and the oblique
+            file backs three different weights.
+
+        3.  A base font with neither a matching name nor a ``styles``
+            list backs every style in the family that nothing else
+            claims - the family-level default.
+
+        A style claimed by (1) or (2) never falls back to (3).
+        """
+        if style_key in self.base_fonts:
+            return self.base_fonts[style_key]
+        for spec in self.base_fonts.values():
+            if style_key in spec.styles:
+                return spec
+        for spec in self.base_fonts.values():
+            if not spec.styles:
+                return spec
+        return None
 
 
 @dataclass(frozen=True)
@@ -156,6 +195,7 @@ def _parse_style(key: str, raw: dict[str, Any]) -> StyleSpec:
         output_name=raw.get("output_name"),
         origin=raw.get("origin"),
         reference=raw.get("reference"),
+        source_font=raw.get("source_font"),
     )
 
 
@@ -168,6 +208,7 @@ def _parse_base_font(key: str, raw: dict[str, Any]) -> BaseFontSpec:
         path=str(raw["path"]),
         exact_weight=bool(raw.get("exact_weight", False)),
         license=raw.get("license"),
+        styles=tuple(str(s) for s in (raw.get("styles") or ())),
     )
 
 
@@ -214,7 +255,7 @@ def parse_manifest(raw: dict[str, Any]) -> Manifest:
             expect_characters=fam_raw.get("expect_characters"),
         )
 
-    return Manifest(
+    manifest = Manifest(
         version=version,
         name=str(name),
         inputs=[str(p) for p in inputs],
@@ -223,6 +264,32 @@ def parse_manifest(raw: dict[str, Any]) -> Manifest:
         test_characters=str(raw.get("test_characters") or Manifest.test_characters),
         reproducible_timestamps=bool(raw.get("reproducible_timestamps", True)),
     )
+    _check_output_names(manifest)
+    return manifest
+
+
+def _check_output_names(manifest: Manifest) -> None:
+    """No two styles may write to the same file.
+
+    The output name is the FILE name, so two styles collide when they
+    produce the same name - whatever their keys are.  The second one
+    silently overwrites the first: the output holds one file where there
+    should be two, and the report lists both styles as built.  Nothing
+    else in the pipeline notices.
+
+    The real case is a family that has a "Thin" in two families, or a
+    style given an ``output_name`` that another style already uses.
+    """
+    seen: dict[str, str] = {}
+    for family in manifest.families.values():
+        for key, spec in family.styles.items():
+            stem = spec.stem
+            if stem in seen:
+                raise ManifestError(
+                    f"styles {seen[stem]!r} and {key!r} both write to {stem!r}; "
+                    "give one of them a distinct output_name"
+                )
+            seen[stem] = key
 
 
 def resolve_inputs(patterns: list[str]) -> list[str]:

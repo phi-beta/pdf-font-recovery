@@ -116,6 +116,28 @@ def has_ink(font, name: str) -> bool:
         return False
 
 
+def draws_anything(font, name: str) -> bool:
+    """Does this glyph draw anything?  Works for TrueType and CFF alike.
+
+    ``has_ink`` reads the TrueType ``glyf`` table, so it answers False for
+    every CFF glyph - which makes it useless as a guard in a CFF code path.
+    This one asks the glyph set to draw the glyph and looks at the bounds
+    it produced, so it works whatever the outline format is.
+
+    A glyph that draws nothing is blank: it occupies an advance width and
+    paints nothing, which is what a PDF subset's unset character looks
+    like.
+    """
+    try:
+        from fontTools.pens.boundsPen import BoundsPen
+
+        pen = BoundsPen(None)
+        font.getGlyphSet()[name].draw(pen)
+    except Exception:
+        return False
+    return pen.bounds is not None
+
+
 def find_placeholder_characters(font) -> set[str]:
     """Characters whose glyph is a shared missing-glyph box.
 
@@ -144,6 +166,57 @@ def find_placeholder_characters(font) -> set[str]:
         for code, name in cmap.items()
         if has_ink(font, name) and glyph_bounds(font, name) == common
     }
+
+
+def find_truncated_characters(font, group: str = "digits") -> set[str]:
+    """Characters whose glyph is a FRAGMENT of the one it should be.
+
+    A glyph that is dramatically smaller than its siblings - a figure
+    that reaches only a third of the way up, say - is not a letterform.
+    It is a piece of one.  Nothing else in the pipeline catches this: the
+    glyph has ink, it is not a placeholder, it carries the right name
+    and the right advance.  It simply renders as the bottom of a
+    character.
+
+    The case this found is a good one: the publisher's own demo package
+    shipped every weight with a truncated figure four, and the delivered
+    library carried it faithfully through every repair.
+
+    The comparison is made within a group of characters that SHOULD be
+    the same size - the figures, or the capitals - because a figure and a
+    capital are legitimately different heights.
+    """
+    cmap = font.getBestCmap()
+    groups = {
+        "digits": "0123456789",
+        "capitals": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    }
+    characters = groups.get(group, group)
+    heights: dict[str, int] = {}
+    for char in characters:
+        name = cmap.get(ord(char))
+        if not name:
+            continue
+        try:
+            bounds = glyph_bounds(font, name)
+        except Exception:
+            continue
+        if not bounds:
+            continue
+        heights[char] = bounds[3] - bounds[1]
+    if len(heights) < 4:
+        # Too few to judge by; a group of two can differ legitimately.
+        return set()
+    values = sorted(heights.values())
+    median = values[len(values) // 2]
+    if median <= 0:
+        return set()
+    truncated = set()
+    for char, height in heights.items():
+        # A glyph below 60% of the group's median height is a fragment.
+        if height < median * 0.6:
+            truncated.add(char)
+    return truncated
 
 
 def check_font(path: str, test_characters: str) -> FontCheck:
@@ -183,6 +256,20 @@ def check_font(path: str, test_characters: str) -> FontCheck:
             )
         except Exception:
             result.placeholders = []
+
+    # A truncated glyph has ink, so it passes the ink check and the
+    # placeholder check, and it carries the right name and advance.  It
+    # renders as the bottom third of a character, and only a comparison
+    # against its siblings reveals it.
+    try:
+        for group in ("digits", "capitals"):
+            truncated = find_truncated_characters(font, group)
+            if truncated:
+                result.problems.append(
+                    f"{group} are truncated fragments: {''.join(sorted(truncated))}"
+                )
+    except Exception:
+        pass
 
     try:
         pil_font = ImageFont.truetype(path, 48)

@@ -76,6 +76,19 @@ class PipelineResult:
         }
 
 
+def _is_cff(path: str) -> bool:
+    """True when the font at ``path`` is a CFF (OpenType/CFF) font.
+
+    The two formats need different borrow paths: a CFF font's glyphs are
+    charstrings and its widths are measured from them, while a TrueType
+    font's glyphs are ``glyf`` outlines with their widths in ``hmtx``.
+    """
+    try:
+        return "CFF " in extract.TTFont(path)
+    except Exception:
+        return False
+
+
 def _style_spec_for(manifest: Manifest, key: str) -> StyleSpec | None:
     return manifest.style(key)
 
@@ -114,6 +127,57 @@ def run(
     )
 
     built: list[tuple[StyleSpec, str, str]] = []  # (spec, path, format)
+
+    # ---- styles no document embeds
+    #
+    # A publisher's demo package carries weights and obliques that no
+    # document in the corpus ever sets - the Hair, the Italic variants.
+    # Those are COPIED, not reconstructed: they are the publisher's own
+    # files, complete and correct.
+    log("[2b/6] source fonts")
+    for _family_name, family in sorted(manifest.families.items()):
+        for style_key, spec in sorted(family.styles.items()):
+            if not spec.source_font:
+                continue
+            if any(style_key == key for key, _fmt in grouped):
+                continue
+            if style_key in family.skip:
+                continue
+            if not os.path.isfile(spec.source_font):
+                log(f"      SKIP {style_key:26s} source font not found")
+                result.skipped.append(
+                    {"style": style_key, "reason": "source font not found"}
+                )
+                continue
+            extension = os.path.splitext(spec.source_font)[1] or ".otf"
+            out_path = os.path.join(staging, spec.stem + extension)
+            try:
+                shutil.copyfile(spec.source_font, out_path)
+            except Exception as exc:
+                log(f"      FAIL {style_key:26s} {type(exc).__name__}: {exc}")
+                result.skipped.append(
+                    {"style": style_key, "reason": f"{type(exc).__name__}: {exc}"}
+                )
+                continue
+            log(
+                f"      SRC  {style_key:26s} {os.path.getsize(out_path):7d}b  "
+                f"(publisher file)"
+            )
+            built.append((spec, out_path, extension.lstrip(".").upper()))
+            result.fonts.append(
+                {
+                    "style": style_key,
+                    "file": os.path.basename(out_path),
+                    "family": spec.family,
+                    "subfamily": spec.subfamily,
+                    "weight": spec.weight,
+                    "italic": spec.italic,
+                    "glyphs": None,
+                    "source": os.path.basename(spec.source_font),
+                    "format": "source",
+                }
+            )
+
     for (style_key, fmt), chunks in sorted(grouped.items()):
         if fmt in extract.UNUSABLE_FORMATS:
             log(f"      SKIP {style_key:26s} {fmt} (not usable)")
@@ -217,7 +281,7 @@ def run(
         family = manifest.families.get(spec.family)
         if not family:
             continue
-        base_spec = family.base_fonts.get(spec.key)
+        base_spec = family.base_font_for(spec.key)
         if not base_spec:
             continue
         report = repair.repair_style(
@@ -253,32 +317,69 @@ def run(
         member_paths = [
             path for spec, path, _fmt in built if spec.family == family_name
         ]
-        if len(member_paths) < 2:
+        if not member_paths:
             continue
         for spec, path, _fmt in built:
             if spec.family != family_name:
                 continue
             donors = [other for other in member_paths if other != path]
+            # The family's base font is a donor too, and it comes FIRST.
+            #
+            # The base font is the publisher's own file for this family:
+            # complete, correct, and carrying the characters no document
+            # in the corpus set.  A sibling weight's copy of a character
+            # may be a subset, or a blank, and the donor that provides a
+            # character first wins - so the base font has to lead.
+            family = manifest.families.get(family_name)
+            base_spec = family.base_font_for(spec.key) if family else None
+            if base_spec and os.path.isfile(base_spec.path):
+                donors = [base_spec.path] + donors
+            # The style's own REFERENCE is the publisher's file for THIS
+            # weight, so it is the right donor for a character the PDF
+            # subset leaves blank: same weight, same letterforms.  The
+            # family base font is a different weight - Regular backing a
+            # Black - and borrowing its 'i' gives the Black a Regular's
+            # advance width, which the spacing check then flags.
+            if spec.reference and os.path.isfile(spec.reference):
+                donors = [spec.reference] + donors
             try:
-                outcome = cff_borrow.borrow_characters(
-                    path,
-                    donors,
-                    reproducible_timestamp=timestamp,
-                )
+                if _is_cff(path):
+                    outcome = cff_borrow.borrow_characters(
+                        path,
+                        donors,
+                        reproducible_timestamp=timestamp,
+                    )
+                    borrowed = outcome["borrowed"]
+                    overlay = outcome["overlay"]
+                    errors = outcome["errors"]
+                else:
+                    # A TrueType style borrows from its siblings the same
+                    # way: a sibling weight's glyph fills a character this
+                    # weight does not have.  A sibling's PLACEHOLDER box
+                    # is never borrowed - it renders as a box with a
+                    # letter in it, which is worse than a blank.
+                    report = repair.borrow_across_weights(
+                        path,
+                        spec.key,
+                        donors,
+                        test_characters=manifest.test_characters,
+                    )
+                    borrowed = len(report.borrowed)
+                    overlay = 0
+                    errors = []
             except Exception as exc:
                 log(f"      FAIL {spec.key:26s} {type(exc).__name__}: {exc}")
                 result.skipped.append(
                     {"style": spec.key, "reason": f"borrow: {type(exc).__name__}: {exc}"}
                 )
                 continue
-            if outcome["borrowed"] or outcome["overlay"]:
+            if borrowed or overlay:
                 log(
-                    f"      {spec.key:26s} borrowed={outcome['borrowed']:3d} "
-                    f"overlay={outcome['overlay']:3d} errors={len(outcome['errors'])}"
+                    f"      {spec.key:26s} borrowed={borrowed:3d} "
+                    f"overlay={overlay:3d} errors={len(errors)}"
                 )
-            if outcome["errors"]:
-                for message in outcome["errors"][:5]:
-                    log(f"        {message}")
+            for message in errors[:5]:
+                log(f"        {message}")
             result.repairs.append(
                 {
                     "file": os.path.basename(path),
@@ -288,9 +389,9 @@ def run(
                     "borrowed": [],
                     "overlaid": [],
                     "still_blank": [],
-                    "problems": outcome["errors"],
-                    "cff_borrowed": outcome["borrowed"],
-                    "cff_overlay": outcome["overlay"],
+                    "problems": errors,
+                    "cff_borrowed": borrowed,
+                    "cff_overlay": overlay,
                 }
             )
     result.stages.append(StageReport("borrow", {"families": len(manifest.families)}).to_dict())
@@ -388,9 +489,12 @@ def run(
                 },
             ).to_dict()
         )
+        # The gate FAILED, whether or not there was anything to publish.
+        # Setting this only on the publish path made a dry run report a
+        # pass while listing the failures underneath it.
+        result.summary["gate_passed"] = False
         if publish:
             log("      NOT publishing - the staging directory is left for inspection")
-            result.summary["gate_passed"] = False
             _write_reports(result, staging)
             return result
     else:
